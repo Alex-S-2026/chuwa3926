@@ -19,7 +19,6 @@
 
 
 
-
 ## Q2. Given the following code, what will be printed and why?
 ```
 int a = 10;
@@ -28,6 +27,8 @@ b = 20;
 System.out.println(a);
 ```
 
+
+
 ## Q3. Given the following code, what will be printed and why?
 ```
 int[] arr1 = {1, 2, 3};
@@ -35,6 +36,7 @@ int[] arr2 = arr1;
 arr2[0] = 100;
 System.out.println(arr1[0]);
 ```
+
 
 
 ## Q4. What is the output of the following code? Explain your answer.
@@ -57,7 +59,6 @@ System.out.println(s1.equals(s3));
 
 
 
-
 ## Q7. What will happen when you try to compile and run this code?
 ```
 public class Test {
@@ -68,6 +69,7 @@ public class Test {
     }
 }
 ```
+
 
 
 ## Q8. List the four pillars of Object-Oriented Programming and briefly explain each one in one sentence.
@@ -94,8 +96,9 @@ public class Counter {
         System.out.println(Counter.count);
     }
 }
-
 ```
+
+
 
 # Programming Questions
 
@@ -109,7 +112,6 @@ public class Counter {
     - If invalid value is passed, do not change the field
 
 Write a main method to test your class.
-
 
 
 
