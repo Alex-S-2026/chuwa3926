@@ -2,7 +2,7 @@
 
 - alex_shen
 - 2026-
-- Java OOP Homework 
+- Homework 
 - Topics Covered:
     - 
 - Submission: Submit your answers as a single document or code files
