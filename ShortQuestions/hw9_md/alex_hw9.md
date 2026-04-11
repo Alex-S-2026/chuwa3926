@@ -198,5 +198,162 @@ Explain and compare following concepts, provide specific examples when doing com
 # Programming Questions
 
 ## Q3. Write unit test for CommentServiceImpl.java: https://github.com/CTYue/springboot-redbook/blob/10_testing/src/main/java/com/chuwa/redbook/service/impl/CommentServiceImpl.java
+- This entire repo branch (and the file `CommentServiceImpl.java` included) is downloaded in the folder `Chuwa\hw\chuwa3926\Coding\hw9_code\springboot-redbook-10_testing\springboot-redbook-10_testing`
 - Try to cover as many lines/branches as possible.
 - Prove your code coverage using Jacoco Report.
+
+### Q3 — Engineering plan (before implementation)
+
+This section is the **design + roadmap** for Q3: what we are building, in what order, how we prove coverage, how it sits in the real app, and how to automate it later.
+
+---
+
+#### 1. System design (testing architecture)
+
+**Goal:** Verify `CommentServiceImpl` **business rules** and **orchestration** (call order, which repository methods run, which exceptions surface) **without** starting MySQL, Tomcat, or the full Spring context.
+
+**Core idea — unit test in the “London / mockist” style (same as existing `PostServiceImplTest`):**
+
+| Piece | Role |
+|--------|------|
+| **System under test (SUT)** | `CommentServiceImpl` — the class we assert on. |
+| **Collaborators (mocked)** | `CommentRepository`, `PostRepository`, `ModelMapper` — replaced by Mockito `@Mock` so behavior is **fully controlled** in each test. |
+| **Test runner** | JUnit 5 + `MockitoExtension` — injects mocks into `@InjectMocks CommentServiceImpl`. |
+
+**Why mock repositories instead of `@SpringBootTest` + H2?**
+
+- **Purpose:** Fast, deterministic tests; failures point to **service logic**, not DB wiring or environment.
+- **Mechanism:** `when(postRepository.findById(...)).thenReturn(Optional.of(...))` or `Optional.empty()` to simulate found / not found.
+- **Trade-off:** We do **not** prove JPA queries or schema here; that would be **integration** tests (e.g. `@DataJpaTest`). For this homework, **unit tests + JaCoCo on the service class** match the assignment and the repo’s existing pattern.
+
+**Data flow (mental model):**
+
+```mermaid
+flowchart LR
+  subgraph test
+    T[CommentServiceImplTest]
+  end
+  subgraph sut
+    S[CommentServiceImpl]
+  end
+  subgraph mocks
+    PR[PostRepository mock]
+    CR[CommentRepository mock]
+    MM[ModelMapper mock]
+  end
+  T -->|calls| S
+  S --> PR
+  S --> CR
+  S --> MM
+```
+
+**Exception design (what we assert):**
+
+- `ResourceNotFoundException` — missing post or missing comment (`Optional` empty paths).
+- `BlogAPIException` with `HttpStatus.BAD_REQUEST` — comment exists but `comment.getPost().getId()` does not equal the requested post’s id (wrong-post ownership checks in `getCommentById`, `updateComment`, `deleteComment`).
+
+---
+
+#### 2. Development map (implementation order, locations, purposes)
+
+**Repository root:** `hw/chuwa3926/Coding/hw9_code/springboot-redbook-10_testing/springboot-redbook-10_testing/`
+
+| Step | Location | What to add / change | Purpose |
+|------|-----------|----------------------|---------|
+| **1** | `src/test/java/com/chuwa/redbook/service/impl/CommentServiceImplTest.java` | New test class | Mirror `PostServiceImplTest`: `@ExtendWith(MockitoExtension.class)`, `@Mock` repos + `ModelMapper`, `@InjectMocks` service. |
+| **2** | Same file — `@BeforeEach` | Build reusable `Post`, `Comment`, `CommentDto` fixtures (ids aligned for “happy path”) | Reduce duplication; keep tests readable. |
+| **3** | `createComment` tests | Stub `modelMapper.map(dto→entity)`, `postRepository.findById` → `Optional.of(post)`, `commentRepository.save` → saved entity, `modelMapper.map(entity→dto)` | Happy path + **post not found** → `ResourceNotFoundException`. |
+| **4** | `getCommentsByPostId` tests | `when(commentRepository.findByPostId).thenReturn(emptyList / list)`; stub `modelMapper.map` per element | Cover stream path (0 and N comments). |
+| **5** | `getCommentById` tests | Chain: load post, load comment; vary optional empties and **mismatched post** on comment | All branches including `BlogAPIException`. |
+| **6** | `updateComment` tests | Same branch matrix as (5), plus assert `setName/Email/Body` effect via `save` argument **Captor** (optional but strong) | Update path + ownership + not found. |
+| **7** | `deleteComment` tests | Same branches; `doNothing().when(commentRepository).delete(...)`; `verify(..., times(1)).delete` | Prove delete only when ownership OK. |
+| **8** | `commentServiceMapperUtil` | **Static** helper — call with a real `Comment` (and optionally assert non-null `CommentDto` fields) | Uses a **real** `ModelMapper` inside the util; no need to mock; covers lines other tests skip. |
+| **9** | `pom.xml` | Already has `jacoco-maven-plugin` with `prepare-agent` + `report` on `test` | Generate HTML report after `mvn test`. Optional later: `jacoco:check` with `counter`/`minimum` for **CommentServiceImpl** only (see below). |
+
+**Recommended test method checklist (maps to branches in source):**
+
+1. `createComment` — success.
+2. `createComment` — post id not found.
+3. `getCommentsByPostId` — empty list.
+4. `getCommentsByPostId` — multiple comments (mapper invoked per item).
+5. `getCommentById` — success (same post id on comment’s post and path param).
+6. `getCommentById` — post not found.
+7. `getCommentById` — comment not found.
+8. `getCommentById` — comment belongs to **another** post → `BlogAPIException`, assert status `BAD_REQUEST` and message.
+9. `updateComment` — repeat (5)–(8) + assert saved comment fields match request (Captor or returned DTO).
+10. `deleteComment` — success + `verify(delete)`.
+11. `deleteComment` — post not found / comment not found / wrong post (no `delete` verify on error paths).
+12. `commentServiceMapperUtil` — maps `Comment` → `CommentDto`.
+
+---
+
+#### 3. “100% coverage” — scope and how we achieve it
+
+**Clarification:** In industry, “100% coverage” almost always means **a chosen scope** (e.g. one module or diff coverage), not “every line in the entire monolith,” which is costly and often low value.
+
+**For this assignment, the meaningful scope is:** **100% line and branch coverage on `CommentServiceImpl` only**, as shown in JaCoCo’s class-level report for that file.
+
+**Mechanism:**
+
+- Run from project root: `mvn clean test` (JaCoCo agent attaches via existing `prepare-agent`; `report` runs in `test` phase).
+- Open: `target/site/jacoco/index.html` → navigate to `com.chuwa.redbook.service.impl` → `CommentServiceImpl`.
+- If any line stays **red/yellow**, add a test that drives that path (usually another `Optional.empty()` or mismatch case).
+
+**Optional hard gate (future tightening):** add a second `execution` to `jacoco-maven-plugin` with goal `check` and `<includes><include>com/chuwa/redbook/service/impl/CommentServiceImpl.class</include></includes>` plus `<minimum>` for `LINE` and `BRANCH`. **Trade-off:** CI fails on coverage drops (good discipline); config must be maintained when class grows.
+
+---
+
+#### 4. Integration into the application
+
+| Layer | What “integration” means here | Purpose |
+|--------|----------------------------------|---------|
+| **Maven lifecycle** | `mvn test` runs all `*Test` classes; JaCoCo binds to the same JVM | Same command developers and CI use; no separate “coverage tool” step beyond Maven. |
+| **Runtime app** | Unit tests **do not** deploy inside the running Spring Boot app | They validate the **service contract** used by `CommentController` (or others). If controllers break wiring, add **`@WebMvcTest(CommentController.class)`** later — that is **integration** at the web layer, optional stretch goal. |
+| **Full stack** | `RedbookApplicationTests` + real DB profile | **E2E / integration**; out of scope for “unit test CommentServiceImpl” but valid for a separate pipeline stage. |
+
+**Interview line:** *Unit tests guard the service; controller tests guard HTTP mapping; full app tests guard deployment and infrastructure.*
+
+---
+
+#### 5. Automating development and testing (future)
+
+| Practice | Purpose | Typical tool |
+|----------|---------|----------------|
+| **CI on every push/PR** | Every change runs `mvn -B test` (and optionally `jacoco:check`) | GitHub Actions, GitLab CI, Jenkins |
+| **Coverage report as artifact** | Reviewers see HTML or Cobertura/XML in PR | Upload `target/site/jacoco` or use Codecov/SonarQube |
+| **Pre-push hook (local)** | Fast feedback before remote | Husky (Node) or simple `git hook` running Maven; or IDE “run tests before commit” |
+| **Matrix** | Java 11 and 17 if library supports | CI `strategy.matrix` |
+| **Caching** | Faster `mvn` in CI | `actions/cache` for `~/.m2/repository` |
+
+**Trade-off:** Full CI on every commit costs minutes; **split** fast unit job (no DB) vs slower integration job (Testcontainers/H2) keeps feedback loops short.
+
+---
+
+#### 6. Summary sound bite (for interviews)
+
+We will **isolate** `CommentServiceImpl`, **mock** persistence and mapping, drive **every branch** (found/not found/wrong post), prove it with **JaCoCo HTML**, and later **gate merges** with `jacoco:check` + CI so coverage and behavior do not regress silently.
+
+---
+
+### Q3 — Deliverables (completed)
+
+**Primary deliverable:** `CommentServiceImplTest.java` at  
+`hw/chuwa3926/Coding/hw9_code/springboot-redbook-10_testing/springboot-redbook-10_testing/src/test/java/com/chuwa/redbook/service/impl/CommentServiceImplTest.java`
+
+- **17** JUnit 5 tests: `createComment` (success + post missing), `getCommentsByPostId` (empty + multiple), `getCommentById` / `updateComment` / `deleteComment` (success, post missing, comment missing, wrong post → `BlogAPIException`), `commentServiceMapperUtil` (real `ModelMapper`).
+- **Style:** `@ExtendWith(MockitoExtension.class)`, `@Mock` on `CommentRepository`, `PostRepository`, `ModelMapper`, `@InjectMocks` on `CommentServiceImpl` (aligned with `PostServiceImplTest`).
+
+**JaCoCo proof (after full `mvn test` on this machine):** open  
+`.../springboot-redbook-10_testing/target/site/jacoco/index.html` → package `com.chuwa.redbook.service.impl` → class **CommentServiceImpl**.  
+`target/site/jacoco/jacoco.csv` row for `CommentServiceImpl` shows **0** missed instructions/lines/branches and **252** instructions / **37** lines / **6** branches covered → **100%** coverage for that class.
+
+**How to reproduce:** from the project folder, set `JAVA_HOME` to your JDK, then run **`mvnw.cmd test`** (Windows) or **`./mvnw test`**. JaCoCo report is generated in the **`test`** phase by the existing `jacoco-maven-plugin`.
+
+**Supporting changes (so the whole module builds and tests pass without your classroom MySQL):**
+
+| Change | Why |
+|--------|-----|
+| `pom.xml`: Lombok **1.18.44**, `maven-compiler-plugin` with **`-proc:full`** + Lombok **annotationProcessorPaths** | JDK **25** needs a recent Lombok and explicit annotation processing so `@Slf4j` / `@Data` compile. |
+| `pom.xml`: **H2** `test` scope | In-memory DB for tests. |
+| `src/test/resources/application.properties` | Overrides MySQL URL with **H2**; adds **JWT** / **pathmatch** props so the Spring context loads in CI. |
+| `RedbookApplicationTests`: **`@Transactional`** | Avoids **LazyInitializationException** when `ModelMapper` maps `Post.comments` after `createPost`. |
